@@ -12,7 +12,7 @@
 ; Build:  ISCC.exe installer\Sirkyulo.iss
 
 #define AppName        "Sirkyulo"
-#define AppVersion     "1.0.0"
+#define AppVersion     "1.0.1"
 #define AppPublisher   "sd100596"
 #define AppUrl         "https://github.com/sd100596/Sirkyulo"
 #define AppExe         "Sirkyulo.exe"
