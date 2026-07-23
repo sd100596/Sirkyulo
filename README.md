@@ -1,6 +1,6 @@
 # Sirkyulo
 
-Group Windows desktop icons into one icon. Click it, and they fan out in a circle. 
+Turn a cluttered Windows desktop into organized groups. Combine files, folders, and shortcuts into a single icon, which expands into a radial menu.
 
 <p align="center">
   <img src="docs/ring.png" alt="A Sirkyulo group open on the desktop" width="480">
