@@ -13,7 +13,7 @@
 
 #define AppName        "Sirkyulo"
 #define AppVersion     "1.0.1"
-#define AppPublisher   "sd100596"
+#define AppPublisher   "Saransh Dashore"
 #define AppUrl         "https://github.com/sd100596/Sirkyulo"
 #define AppExe         "Sirkyulo.exe"
 #define PublishDir     "..\publish"
@@ -36,6 +36,10 @@ DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 DisableDirPage=auto
+
+; Shown as the agreement page. Chiefly so the warranty disclaimer is put in front of the
+; user before an app that relocates their files starts doing so.
+LicenseFile=..\LICENSE
 
 OutputDir=..\dist
 ; Deliberately version-free: the README and release notes link to /releases/latest and name
@@ -69,10 +73,17 @@ Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 
 [Registry]
-; The app manages this key itself from its tray menu; the task just sets the initial state.
+; The app manages this key itself from its tray menu; the task sets the initial state.
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; \
     ValueName: "{#AppName}"; ValueData: """{app}\{#AppExe}"""; \
     Flags: uninsdeletevalue; Tasks: startupicon
+
+; Leaving the box unticked must actively clear the value, not merely decline to write it.
+; A reinstall over a version where it was ticked would otherwise inherit the old setting,
+; and the tray menu would show it enabled despite the user having just said no.
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; \
+    ValueName: "{#AppName}"; \
+    Flags: deletevalue uninsdeletevalue; Tasks: not startupicon
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "Start {#AppName} now"; Flags: nowait postinstall skipifsilent

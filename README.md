@@ -65,3 +65,7 @@ dotnet publish src/Sirkyulo.App -c Release -r win-x64 --self-contained false -o 
 
 To build the installer, compile `installer/Sirkyulo.iss` with
 [Inno Setup 6](https://jrsoftware.org/isinfo.php). Output lands in `dist/`.
+
+## Licence
+
+[MIT](LICENSE).
