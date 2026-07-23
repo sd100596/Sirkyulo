@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Sirkyulo.Core\Sirkyulo.Core.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!--
+      WPF is enabled here only for imaging: IShellItemImageFactory hands back a 32bpp
+      premultiplied-alpha HBITMAP, and WPF's Imaging.CreateBitmapSourceFromHBitmap is the
+      only in-box conversion that preserves that alpha. System.Drawing.Image.FromHbitmap
+      silently flattens it and every icon comes out with a black fringe.
+    -->
+    <UseWPF>true</UseWPF>
+  </PropertyGroup>
+
+</Project>

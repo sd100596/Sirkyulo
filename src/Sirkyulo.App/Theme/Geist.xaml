@@ -1,0 +1,230 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <!--
+    Vercel's Geist tokens, dark variant.
+
+    Dark rather than light because every surface Sirkyulo draws floats over the user's
+    wallpaper, which is arbitrary and often bright. Geist's #FAFAFA light surface would
+    glare; the #0A0A0A ink surface recedes and lets the icons carry the colour, which is
+    also the system's own "monochrome by default, colour only where it means something"
+    principle.
+  -->
+
+  <!-- Surfaces -->
+  <Color x:Key="SurfaceColor">#0A0A0A</Color>
+  <SolidColorBrush x:Key="Surface" Color="#0A0A0A" />
+  <SolidColorBrush x:Key="SurfaceElevated" Color="#171717" />
+  <SolidColorBrush x:Key="SurfaceHover" Color="#20FFFFFF" />
+
+  <!-- Text -->
+  <SolidColorBrush x:Key="TextPrimary" Color="#EDEDED" />
+  <SolidColorBrush x:Key="TextSecondary" Color="#A1A1A1" />
+  <SolidColorBrush x:Key="TextMuted" Color="#8F8F8F" />
+
+  <!-- Borders. Geist draws borders as hairline shadows; over a wallpaper a literal
+       1px stroke is what keeps dark cover art from bleeding into the dark surface. -->
+  <SolidColorBrush x:Key="BorderSubtle" Color="#1AFFFFFF" />
+  <SolidColorBrush x:Key="BorderDefault" Color="#24FFFFFF" />
+  <SolidColorBrush x:Key="BorderStrong" Color="#3DFFFFFF" />
+
+  <!-- The single interactive accent. Focus rings only; never decoration. -->
+  <SolidColorBrush x:Key="Accent" Color="#0072F5" />
+  <SolidColorBrush x:Key="Danger" Color="#E5484D" />
+
+  <!-- Shape: 6px functional UI, 12px cards. Icons are cards. -->
+  <sys:Double xmlns:sys="clr-namespace:System;assembly=System.Runtime" x:Key="RadiusSmall">6</sys:Double>
+  <sys:Double xmlns:sys="clr-namespace:System;assembly=System.Runtime" x:Key="RadiusCard">12</sys:Double>
+  <CornerRadius x:Key="CornerSmall">6</CornerRadius>
+  <CornerRadius x:Key="CornerCard">12</CornerRadius>
+
+  <!-- Motion: Geist's cubic-bezier(.175,.885,.32,1.1) is a swift curve that overshoots
+       slightly. BackEase/EaseOut is its closest in-box WPF equivalent. -->
+  <BackEase x:Key="GeistEase" EasingMode="EaseOut" Amplitude="0.28" />
+  <CubicEase x:Key="GeistEaseSoft" EasingMode="EaseOut" />
+
+  <FontFamily x:Key="GeistSans">Geist, Segoe UI Variable Text, Segoe UI</FontFamily>
+
+  <!--
+    Scrim behind the ring. A radial fade rather than a full-screen dim: it lifts the icons
+    off a bright wallpaper without blacking out the desktop, and it visually anchors the
+    menu to its centre.
+  -->
+  <RadialGradientBrush x:Key="RingScrim" GradientOrigin="0.5,0.5" Center="0.5,0.5"
+                       RadiusX="0.5" RadiusY="0.5">
+    <GradientStop Color="#F2000000" Offset="0.0" />
+    <GradientStop Color="#ED000000" Offset="0.68" />
+    <GradientStop Color="#D4000000" Offset="0.86" />
+    <GradientStop Color="#00000000" Offset="1.0" />
+  </RadialGradientBrush>
+
+  <!-- Menu elevation, per Geist's menu shadow token. -->
+  <DropShadowEffect x:Key="MenuShadow" BlurRadius="24" ShadowDepth="8"
+                    Direction="270" Opacity="0.45" Color="#000000" />
+
+  <Style x:Key="CentreLabel" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{StaticResource GeistSans}" />
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="FontWeight" Value="Medium" />
+    <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
+    <Setter Property="TextAlignment" Value="Center" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    <Setter Property="MaxHeight" Value="60" />
+  </Style>
+
+  <Style x:Key="CentreSubLabel" TargetType="TextBlock" BasedOn="{StaticResource CentreLabel}">
+    <Setter Property="FontSize" Value="11" />
+    <Setter Property="FontWeight" Value="Normal" />
+    <Setter Property="Foreground" Value="{StaticResource TextMuted}" />
+  </Style>
+
+  <!-- Buttons. Geist's default form height is 40px, radius 6px, label weight 400. -->
+  <Style x:Key="GeistButtonBase" TargetType="Button">
+    <Setter Property="Height" Value="36" />
+    <Setter Property="Padding" Value="14,0" />
+    <Setter Property="MinWidth" Value="76" />
+    <Setter Property="FontFamily" Value="{StaticResource GeistSans}" />
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="Cursor" Value="Hand" />
+    <Setter Property="SnapsToDevicePixels" Value="True" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="Button">
+          <Border x:Name="Chrome"
+                  Background="{TemplateBinding Background}"
+                  BorderBrush="{TemplateBinding BorderBrush}"
+                  BorderThickness="{TemplateBinding BorderThickness}"
+                  CornerRadius="{StaticResource CornerSmall}">
+            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                              Margin="{TemplateBinding Padding}" />
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="Chrome" Property="Opacity" Value="0.86" />
+            </Trigger>
+            <Trigger Property="IsPressed" Value="True">
+              <Setter TargetName="Chrome" Property="Opacity" Value="0.72" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!-- On a dark surface Geist's primary action inverts to white-on-ink. -->
+  <Style x:Key="PrimaryButton" TargetType="Button" BasedOn="{StaticResource GeistButtonBase}">
+    <Setter Property="Background" Value="#EDEDED" />
+    <Setter Property="Foreground" Value="#0A0A0A" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="FontWeight" Value="Medium" />
+  </Style>
+
+  <Style x:Key="GhostButton" TargetType="Button" BasedOn="{StaticResource GeistButtonBase}">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{StaticResource TextSecondary}" />
+    <Setter Property="BorderBrush" Value="{StaticResource BorderDefault}" />
+    <Setter Property="BorderThickness" Value="1" />
+  </Style>
+
+  <!--
+    Context menus. Styled explicitly because the WPF default is a Windows-7-era grey slab
+    that would sit very badly against the ring.
+  -->
+  <Style TargetType="ContextMenu">
+    <Setter Property="Background" Value="{StaticResource Surface}" />
+    <Setter Property="BorderBrush" Value="{StaticResource BorderDefault}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
+    <Setter Property="FontFamily" Value="{StaticResource GeistSans}" />
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="ContextMenu">
+          <Border Background="{TemplateBinding Background}"
+                  BorderBrush="{TemplateBinding BorderBrush}"
+                  BorderThickness="{TemplateBinding BorderThickness}"
+                  CornerRadius="{StaticResource CornerSmall}"
+                  Padding="4"
+                  Effect="{StaticResource MenuShadow}">
+            <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Cycle" />
+          </Border>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style TargetType="MenuItem">
+    <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
+    <Setter Property="FontFamily" Value="{StaticResource GeistSans}" />
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="Padding" Value="10,7" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="MenuItem">
+          <Border x:Name="Chrome" Background="Transparent"
+                  CornerRadius="{StaticResource CornerSmall}"
+                  Padding="{TemplateBinding Padding}">
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <!-- Check gutter. Always reserved, so labels stay aligned whether or not a
+                     given item is checkable. -->
+                <ColumnDefinition Width="20" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+              </Grid.ColumnDefinitions>
+
+              <Path x:Name="Check"
+                    Data="M0,4.2 L3.1,7.3 L8.8,0.6"
+                    Stroke="{StaticResource TextPrimary}"
+                    StrokeThickness="1.7"
+                    StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                    StrokeLineJoin="Round"
+                    VerticalAlignment="Center" HorizontalAlignment="Left"
+                    Margin="1,0,0,0"
+                    Visibility="Collapsed" />
+
+              <ContentPresenter Grid.Column="1" ContentSource="Header" VerticalAlignment="Center" />
+
+              <TextBlock Grid.Column="2" Text="{TemplateBinding InputGestureText}"
+                         Foreground="{StaticResource TextMuted}" Margin="24,0,0,0"
+                         VerticalAlignment="Center" />
+            </Grid>
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsChecked" Value="True">
+              <Setter TargetName="Check" Property="Visibility" Value="Visible" />
+            </Trigger>
+            <Trigger Property="IsHighlighted" Value="True">
+              <Setter TargetName="Chrome" Property="Background" Value="{StaticResource SurfaceHover}" />
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+              <Setter Property="Foreground" Value="{StaticResource TextMuted}" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!--
+    Keyed to MenuItem.SeparatorStyleKey, not just TargetType="Separator". A separator placed
+    inside a menu is styled through that key, so a plain TargetType style is silently ignored
+    and the default bright divider shows through instead.
+  -->
+  <Style x:Key="{x:Static MenuItem.SeparatorStyleKey}" TargetType="Separator">
+    <Setter Property="Height" Value="1" />
+    <Setter Property="Margin" Value="8,5" />
+    <Setter Property="Background" Value="{StaticResource BorderSubtle}" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="Separator">
+          <Border Height="1" Background="{TemplateBinding Background}" />
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style TargetType="Separator" BasedOn="{StaticResource {x:Static MenuItem.SeparatorStyleKey}}" />
+
+</ResourceDictionary>

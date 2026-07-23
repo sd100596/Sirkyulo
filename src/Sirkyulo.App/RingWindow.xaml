@@ -1,0 +1,49 @@
+<Window x:Class="Sirkyulo.App.RingWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Sirkyulo"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowInTaskbar="False"
+        Topmost="True"
+        ResizeMode="NoResize"
+        WindowStartupLocation="Manual"
+        SnapsToDevicePixels="True"
+        UseLayoutRounding="True"
+        RenderOptions.BitmapScalingMode="HighQuality"
+        Focusable="True">
+
+  <Window.Resources>
+    <ResourceDictionary Source="Theme/Geist.xaml" />
+  </Window.Resources>
+
+  <!-- The grid fills the whole square window. Clicks anywhere that is not an item fall
+       through to the backdrop handler and dismiss the menu. -->
+  <Grid x:Name="Root" Background="Transparent">
+
+    <!-- Radial scrim: lifts icons off a bright wallpaper and hides the desktop underneath,
+         fading to fully transparent before the window edge so there is no visible seam. -->
+    <Ellipse x:Name="Scrim" Fill="{StaticResource RingScrim}" IsHitTestVisible="False" />
+
+    <!-- Opaque hub. The ring opens centred on the cursor, which is sitting on the group's own
+         desktop icon, so without a solid surface here that icon and its label show through the
+         middle of the menu. -->
+    <Ellipse x:Name="Hub"
+             HorizontalAlignment="Center" VerticalAlignment="Center"
+             Fill="{StaticResource Surface}"
+             Stroke="{StaticResource BorderSubtle}"
+             StrokeThickness="1"
+             IsHitTestVisible="False" />
+
+    <!-- Centre readout. Shows the group name at rest, the hovered item's full name on hover. -->
+    <StackPanel x:Name="Centre"
+                HorizontalAlignment="Center" VerticalAlignment="Center"
+                IsHitTestVisible="False">
+      <TextBlock x:Name="CentreTitle" Style="{StaticResource CentreLabel}" />
+      <TextBlock x:Name="CentreSub" Style="{StaticResource CentreSubLabel}" Margin="0,3,0,0" />
+    </StackPanel>
+
+    <Canvas x:Name="ItemCanvas" />
+  </Grid>
+</Window>

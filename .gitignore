@@ -1,0 +1,31 @@
+# Build output
+bin/
+obj/
+publish/
+[Dd]ebug/
+[Rr]elease/
+artifacts/
+
+# Test output
+TestResults/
+*.trx
+*.coverage
+coverage*.json
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.DotSettings.user
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Scratch screenshots dropped in the repo root while debugging
+/image.png

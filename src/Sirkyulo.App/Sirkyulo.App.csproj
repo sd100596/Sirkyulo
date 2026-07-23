@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>Sirkyulo</AssemblyName>
+    <RootNamespace>Sirkyulo.App</RootNamespace>
+    <ApplicationIcon>..\..\assets\sirkyulo.ico</ApplicationIcon>
+    <!-- PerMonitorV2 lives here; the ring is positioned from raw cursor coordinates and
+         would land on the wrong monitor at the wrong size without it. -->
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Sirkyulo.Core\Sirkyulo.Core.csproj" />
+    <ProjectReference Include="..\Sirkyulo.Shell.Windows\Sirkyulo.Shell.Windows.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="H.NotifyIcon.Wpf" Version="2.3.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="..\..\assets\sirkyulo.ico" Link="Assets\sirkyulo.ico" />
+    <Resource Include="..\..\assets\tray.ico" Link="Assets\tray.ico" />
+  </ItemGroup>
+
+</Project>
