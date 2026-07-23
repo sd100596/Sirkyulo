@@ -8,7 +8,12 @@ Group Windows desktop icons into one icon. Click it, and they fan out in a circl
 
 ## Getting started
 
-1. Download **Sirkyulo-setup.exe** from the [latest release](https://github.com/sd100596/Sirkyulo/releases/latest) and run it.
+1. Download **Sirkyulo-setup.exe** from the
+   [latest release](https://github.com/sd100596/Sirkyulo/releases/latest) and run it.
+
+   Windows might say **"Windows protected your PC"** — since Sirkyulo isn't code-signed.
+   Click **More info**, then **Run anyway**.
+
 2. Sirkyulo appears in your system tray, near the clock. **Left-click it** and name your group.
    A new icon appears on your desktop.
 3. **Drag things onto it** — shortcuts, files, whole folders. They move inside and disappear
@@ -26,7 +31,7 @@ Group Windows desktop icons into one icon. Click it, and they fan out in a circl
 | Rename or move the group icon | Works normally, like any desktop icon |
 | Delete the group icon | Everything inside comes back to your desktop |
 
-Groups hold shortcuts, files and folders. They don't hold other groups.
+Groups hold shortcuts, files and folders — up to 8 of them. They don't hold other groups.
 
 ## Uninstalling
 
