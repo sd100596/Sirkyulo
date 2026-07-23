@@ -39,11 +39,18 @@ public sealed class GroupItem
     public string? OriginalDesktopPath { get; set; }
 
     /// <summary>
-    /// True when the user's original file was physically relocated into the group folder
-    /// (shortcuts only). False when we merely created a new link pointing at content that
-    /// stayed where it was — real files and folders are never moved.
+    /// True when the original was physically relocated into the group folder, which is now
+    /// every case. Retained because older stores contain entries written when real files and
+    /// folders were linked in place instead of moved; those must not be "restored".
     /// </summary>
     public bool WasMoved { get; set; }
+
+    /// <summary>
+    /// True when this item is a folder. Directories need different move and restore calls
+    /// than files, and the distinction is not always recoverable from the path once the
+    /// original has gone.
+    /// </summary>
+    public bool IsDirectory { get; set; }
 
     public DateTimeOffset AddedUtc { get; set; } = DateTimeOffset.UtcNow;
 }

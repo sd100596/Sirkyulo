@@ -7,17 +7,14 @@ namespace Sirkyulo.App.Services;
 /// <summary>
 /// All mutations to groups and to the user's files.
 ///
-/// The guiding rule here is that nothing the user owns may become unrecoverable. Shortcuts we
-/// absorb are moved, never copied-and-deleted, and every move records where it came from so
-/// ungrouping and uninstalling can put it back. Real files and folders are never relocated at
-/// all — we link to them in place.
+/// The guiding rule here is that nothing the user owns may become unrecoverable. Everything
+/// absorbed into a group is moved rather than copied-and-deleted, and every move records where
+/// it came from, so removing an item, deleting a group and uninstalling can all put it back.
+/// A group folder the index has lost track of is swept back to the desktop on startup.
 /// </summary>
 public sealed class GroupService(GroupStore store)
 {
     private readonly Lock _gate = new();
-
-    /// <summary>Extensions we consider "just a pointer", and therefore safe to relocate.</summary>
-    private static readonly string[] MovableExtensions = [".lnk", ".url"];
 
     public GroupStore Store => store;
 
@@ -132,39 +129,28 @@ public sealed class GroupService(GroupStore store)
             var isDir = Directory.Exists(path);
             if (!isFile && !isDir) return IngestOutcome.Rejected;
 
-            var displayName = Path.GetFileNameWithoutExtension(path);
+            // Folders keep their whole name; only files lose the extension, so a folder called
+            // "My.Stuff" does not become "My".
+            var displayName = isDir ? Path.GetFileName(path) : Path.GetFileNameWithoutExtension(path);
             if (group.Items.Any(i => string.Equals(i.OriginalDesktopPath, path, StringComparison.OrdinalIgnoreCase)))
                 return IngestOutcome.Rejected;
 
-            if (isFile && IsMovable(path))
-            {
-                // A shortcut is only a pointer, so relocating it costs the user nothing and
-                // is what actually declutters the desktop.
-                var destination = UniquePath(Path.Combine(groupDir, Path.GetFileName(path)));
-                File.Move(path, destination);
-                ShellEnvironment.NotifyFileChanged(path, created: false);
-
-                group.Items.Add(new GroupItem
-                {
-                    StoredPath = destination,
-                    DisplayName = displayName,
-                    OriginalDesktopPath = path,
-                    WasMoved = true,
-                });
-                return IngestOutcome.Added;
-            }
-
-            // Real content. Link to it where it lies — moving a user's documents into
-            // %APPDATA% is the one mistake this app must never make.
-            var linkPath = UniquePath(Path.Combine(groupDir, SanitiseName(displayName) + ".lnk"));
-            ShellLink.Create(linkPath, path, null, isDir ? path : Path.GetDirectoryName(path), displayName, path);
+            // Everything moves — shortcuts, files and folders alike. Leaving real content on
+            // the desktop would defeat the entire point of grouping it, and it reads as a
+            // failed drop, which invites the user to delete what they just filed away.
+            // Nothing is stranded by this: every removal path restores to the desktop, and
+            // startup sweeps any group folder the index has lost track of.
+            var destination = UniquePath(Path.Combine(groupDir, Path.GetFileName(path)));
+            MovePath(path, destination);
+            ShellEnvironment.NotifyFileChanged(path, created: false);
 
             group.Items.Add(new GroupItem
             {
-                StoredPath = linkPath,
+                StoredPath = destination,
                 DisplayName = displayName,
                 OriginalDesktopPath = path,
-                WasMoved = false,
+                WasMoved = true,
+                IsDirectory = isDir,
             });
             return IngestOutcome.Added;
         }
@@ -228,13 +214,15 @@ public sealed class GroupService(GroupStore store)
     {
         try
         {
+            // Legacy entries from when real files were linked in place rather than moved:
+            // the original never left the desktop, so only our link should go.
             if (!item.WasMoved)
             {
                 TryDelete(item.StoredPath);
                 return false;
             }
 
-            if (!File.Exists(item.StoredPath)) return false;
+            if (!File.Exists(item.StoredPath) && !Directory.Exists(item.StoredPath)) return false;
 
             // Prefer the exact spot it came from; fall back to the desktop root if that
             // folder is gone, so a restore can never fail into nothing.
@@ -246,7 +234,7 @@ public sealed class GroupService(GroupStore store)
             var fileName = preferred is not null ? Path.GetFileName(preferred) : Path.GetFileName(item.StoredPath);
             var destination = UniquePath(Path.Combine(targetDir, fileName));
 
-            File.Move(item.StoredPath, destination);
+            MovePath(item.StoredPath, destination);
             ShellEnvironment.NotifyFileChanged(destination, created: true);
             return true;
         }
@@ -296,12 +284,51 @@ public sealed class GroupService(GroupStore store)
                 }
 
                 // Drop entries whose stored file vanished from under us.
-                var missing = group.Items.Where(i => !File.Exists(i.StoredPath)).ToList();
+                var missing = group.Items
+                    .Where(i => !File.Exists(i.StoredPath) && !Directory.Exists(i.StoredPath))
+                    .ToList();
                 if (missing.Count == 0) continue;
 
                 foreach (var m in missing) group.Items.Remove(m);
                 store.Save();
             }
+        }
+    }
+
+    /// <summary>
+    /// Undoes everything Sirkyulo has done to this machine, in the only safe order: every
+    /// grouped shortcut goes back to the desktop first, then the group icons, then the startup
+    /// entry, then app data.
+    ///
+    /// This has to exist for the uninstaller to be honest. Deleting the app without it would
+    /// leave the user's shortcuts sitting in %APPDATA% under GUID-named folders, and removing
+    /// that folder would destroy them outright.
+    /// </summary>
+    public int UninstallEverything()
+    {
+        lock (_gate)
+        {
+            var restored = 0;
+            foreach (var group in store.Groups)
+                restored += DeleteGroup(group.Id, removeDesktopLink: true);
+
+            // Catches anything the index had already lost track of.
+            var swept = RecoverOrphans();
+            restored += swept.RestoredItems;
+
+            StartupRegistration.Remove();
+
+            try
+            {
+                if (Directory.Exists(AppPaths.Root)) Directory.Delete(AppPaths.Root, recursive: true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // The log lives in here and is still open, so a leftover file is expected and
+                // harmless — everything that mattered has already been returned to the desktop.
+            }
+
+            return restored;
         }
     }
 
@@ -332,19 +359,21 @@ public sealed class GroupService(GroupStore store)
                 {
                     if (known.Contains(Path.GetFileName(dir))) continue;
 
-                    foreach (var file in Directory.GetFiles(dir))
+                    // Both files and subfolders: a group can now hold either, so sweeping only
+                    // files would leave the user's folders buried in app data.
+                    foreach (var entry in Directory.GetFileSystemEntries(dir))
                     {
                         try
                         {
                             var destination = UniquePath(
-                                Path.Combine(ShellEnvironment.UserDesktop, Path.GetFileName(file)));
-                            File.Move(file, destination);
+                                Path.Combine(ShellEnvironment.UserDesktop, Path.GetFileName(entry)));
+                            MovePath(entry, destination);
                             ShellEnvironment.NotifyFileChanged(destination, created: true);
                             restored++;
                         }
                         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                         {
-                            Log.Warn($"Could not recover '{file}': {ex.Message}");
+                            Log.Warn($"Could not recover '{entry}': {ex.Message}");
                         }
                     }
 
@@ -396,8 +425,43 @@ public sealed class GroupService(GroupStore store)
 
     // ---------------------------------------------------------------- helpers
 
-    private static bool IsMovable(string path) =>
-        MovableExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase);
+    /// <summary>
+    /// Moves a file or a whole folder.
+    ///
+    /// Directory.Move cannot cross volumes — it throws rather than falling back — and a
+    /// redirected Desktop on another drive is common enough that ignoring it would corrupt
+    /// exactly the case where the user has the most data at stake. So a cross-volume folder
+    /// move is done as a full copy, verified, and only then deleted.
+    /// </summary>
+    private static void MovePath(string source, string destination)
+    {
+        if (!Directory.Exists(source))
+        {
+            File.Move(source, destination);
+            return;
+        }
+
+        try
+        {
+            Directory.Move(source, destination);
+        }
+        catch (IOException)
+        {
+            CopyDirectory(source, destination);
+            Directory.Delete(source, recursive: true);
+        }
+    }
+
+    private static void CopyDirectory(string source, string destination)
+    {
+        Directory.CreateDirectory(destination);
+
+        foreach (var file in Directory.GetFiles(source))
+            File.Copy(file, Path.Combine(destination, Path.GetFileName(file)), overwrite: false);
+
+        foreach (var dir in Directory.GetDirectories(source))
+            CopyDirectory(dir, Path.Combine(destination, Path.GetFileName(dir)));
+    }
 
     /// <summary>Appends " (2)", " (3)" … until the path is free. Never overwrites.</summary>
     internal static string UniquePath(string desired)

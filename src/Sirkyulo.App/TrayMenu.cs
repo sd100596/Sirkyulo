@@ -17,9 +17,6 @@ namespace Sirkyulo.App;
 /// </summary>
 public sealed class TrayMenu : IDisposable
 {
-    private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    private const string RunValue = "Sirkyulo";
-
     private readonly GroupService _service;
     private readonly TaskbarIcon _icon;
     private readonly MenuItem _startupItem;
@@ -101,39 +98,9 @@ public sealed class TrayMenu : IDisposable
     /// </summary>
     public static void Notify(string title, string message) => ToastWindow.Show(title, message);
 
-    // ---------------------------------------------------------------- startup
+    private static bool IsRunAtStartupEnabled() => StartupRegistration.IsEnabled();
 
-    private static bool IsRunAtStartupEnabled()
-    {
-        using var key = Registry.CurrentUser.OpenSubKey(RunKey);
-        return key?.GetValue(RunValue) is string;
-    }
-
-    private static void SetRunAtStartup(bool enabled)
-    {
-        try
-        {
-            using var key = Registry.CurrentUser.OpenSubKey(RunKey, writable: true)
-                            ?? Registry.CurrentUser.CreateSubKey(RunKey);
-
-            if (enabled)
-            {
-                var exe = Environment.ProcessPath;
-                if (exe is null) return;
-                key.SetValue(RunValue, $"\"{exe}\"");
-            }
-            else
-            {
-                key.DeleteValue(RunValue, throwOnMissingValue: false);
-            }
-
-            Log.Info($"Run at startup {(enabled ? "enabled" : "disabled")}.");
-        }
-        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
-        {
-            Log.Error("Could not update the startup entry.", ex);
-        }
-    }
+    private static void SetRunAtStartup(bool enabled) => StartupRegistration.Set(enabled);
 
     public void Dispose() => _icon.Dispose();
 }

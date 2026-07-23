@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Threading;
 using Sirkyulo.App.Services;
@@ -29,6 +30,16 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        // Uninstall runs before anything else, including the single-instance handshake: the
+        // uninstaller invokes it while a tray copy may still be running, and forwarding to
+        // that copy would just make it show a ring instead of cleaning up.
+        if (e.Args.Any(a => string.Equals(a, "--uninstall", StringComparison.OrdinalIgnoreCase)))
+        {
+            RunUninstall();
+            Shutdown();
+            return;
+        }
 
         _instance = new SingleInstance();
         if (!_instance.IsPrimary)
@@ -167,6 +178,51 @@ public partial class App : Application
             // Flash the ring so a drop visibly does something — otherwise icons just vanish
             // off the desktop with no feedback at all.
             if (_service.Store.Find(groupId) is { } group) RingWindow.Open(group, _service);
+        }
+    }
+
+    /// <summary>
+    /// Returns the machine to how it was before Sirkyulo ran, then exits. Invoked by the
+    /// uninstaller before it deletes any files.
+    /// </summary>
+    private void RunUninstall()
+    {
+        _isForwarder = true;
+
+        // Any tray copy still running holds groups.json open and would rewrite it after we
+        // clean up. Stop it first and give it a moment to release its handles.
+        foreach (var other in Process.GetProcessesByName("Sirkyulo"))
+        {
+            if (other.Id == Environment.ProcessId) continue;
+            try
+            {
+                other.Kill();
+                other.WaitForExit(5000);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+            {
+                // Already gone, or not ours to stop.
+            }
+            finally
+            {
+                other.Dispose();
+            }
+        }
+
+        try
+        {
+            AppPaths.EnsureCreated();
+            var store = new GroupStore();
+            store.Load();
+
+            var restored = new GroupService(store).UninstallEverything();
+            Log.Info($"Uninstall complete; {restored} shortcut(s) returned to the desktop.");
+        }
+        catch (Exception ex)
+        {
+            // Never block an uninstall. A failure here leaves files behind, which is far
+            // better than an uninstaller that refuses to finish.
+            Log.Error("Uninstall cleanup failed.", ex);
         }
     }
 
