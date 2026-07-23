@@ -38,7 +38,9 @@ DisableProgramGroupPage=yes
 DisableDirPage=auto
 
 OutputDir=..\dist
-OutputBaseFilename=Sirkyulo-{#AppVersion}-setup
+; Deliberately version-free: the README and release notes link to /releases/latest and name
+; this file, so a stable name means those links never need editing per release.
+OutputBaseFilename=Sirkyulo-setup
 SetupIconFile=..\assets\sirkyulo.ico
 UninstallDisplayIcon={app}\{#AppExe}
 UninstallDisplayName={#AppName}

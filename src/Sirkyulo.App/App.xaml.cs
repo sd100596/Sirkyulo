@@ -45,7 +45,7 @@ public partial class App : Application
         if (!_instance.IsPrimary)
         {
             // Every group activation launches a new process. Hand off and get out of the way.
-            SingleInstance.Forward(e.Args);
+            _instance.Forward(e.Args);
             _isForwarder = true;
             Shutdown();
             return;
@@ -145,7 +145,7 @@ public partial class App : Application
         _dropTimer.Start();
     }
 
-    private void FlushDrops(object? sender, EventArgs e)
+    private async void FlushDrops(object? sender, EventArgs e)
     {
         _dropTimer?.Stop();
         if (_service is null) return;
@@ -155,13 +155,32 @@ public partial class App : Application
 
         foreach (var (groupId, paths) in batches)
         {
-            var result = _service.Ingest(groupId, paths);
-            Log.Info($"Ingested {result.Added} item(s) into {groupId:B} " +
-                     $"({result.Skipped} skipped, {result.SkippedGroups} of them groups).");
+            // Off the UI thread: a cross-drive folder move is a real copy, and blocking the
+            // dispatcher would freeze the app and starve the ring's low-level mouse hook,
+            // which Windows evicts if its thread stops pumping.
+            var result = await Task.Run(() => _service.Ingest(groupId, paths));
 
+            Log.Info($"Ingested {result.Added} item(s) into {groupId:B} " +
+                     $"({result.Skipped} skipped: {result.SkippedGroups} groups, " +
+                     $"{result.SkippedTooLarge} too large, {result.SkippedGroupFull} over capacity).");
+
+            if (result.SkippedGroupFull > 0)
+            {
+                ToastWindow.Show("Group is full",
+                    result.Added > 0
+                        ? $"Added {Plural(result.Added)}. A group holds up to {GroupService.MaxItemsPerGroup} items."
+                        : $"A group holds up to {GroupService.MaxItemsPerGroup} items. Make another group for the rest.");
+            }
+            else if (result.SkippedTooLarge > 0)
+            {
+                var limit = GroupService.MaxCrossVolumeBytes / 1024 / 1024;
+                ToastWindow.Show("Too large to move",
+                    $"Items over {limit} MB can't be moved to another drive. " +
+                    "Your desktop and Sirkyulo's storage are on different drives.");
+            }
             // Dropping a group on a group is refused on purpose, so name the reason. Silently
             // doing nothing reads as the app being broken.
-            if (result.SkippedGroups > 0)
+            else if (result.SkippedGroups > 0)
             {
                 ToastWindow.Show("Groups can't be nested",
                     result.Added > 0

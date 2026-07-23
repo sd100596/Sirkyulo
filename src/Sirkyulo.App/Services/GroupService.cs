@@ -58,6 +58,25 @@ public sealed class GroupService(GroupStore store)
 
     // ---------------------------------------------------------------- ingest
 
+    /// <summary>
+    /// Ceiling for a move that has to be performed as a copy.
+    ///
+    /// Only applies across volumes. A move within one volume is a directory-entry update and
+    /// completes instantly whatever the size, so capping it would pointlessly refuse a 40 GB
+    /// folder that would have taken milliseconds.
+    /// </summary>
+    public const long MaxCrossVolumeBytes = 500L * 1024 * 1024;
+
+    /// <summary>
+    /// Most items a single group will hold.
+    ///
+    /// The ring grows its radius to seat every icon, so an uncapped group eventually draws a
+    /// circle larger than the screen and pushes its own items out of reach. Eight keeps the
+    /// ring comfortably on any display, keeps every item within a short flick of the cursor,
+    /// and matches what a radial menu can show without becoming a list.
+    /// </summary>
+    public const int MaxItemsPerGroup = 8;
+
     /// <param name="Added">Items that landed in the group.</param>
     /// <param name="Skipped">Items refused for any reason.</param>
     /// <param name="SkippedGroups">
@@ -65,12 +84,17 @@ public sealed class GroupService(GroupStore store)
     /// specific reason rather than a vague failure — dropping a group on a group is a
     /// deliberate refusal, not a malfunction.
     /// </param>
-    public sealed record IngestResult(int Added, int Skipped, int SkippedGroups);
+    /// <param name="SkippedTooLarge">Of those, how many exceeded the cross-volume copy limit.</param>
+    /// <param name="SkippedGroupFull">Of those, how many arrived at an already-full group.</param>
+    public sealed record IngestResult(
+        int Added, int Skipped, int SkippedGroups, int SkippedTooLarge, int SkippedGroupFull);
 
     private enum IngestOutcome
     {
         Added,
         RejectedAsGroup,
+        RejectedTooLarge,
+        RejectedGroupFull,
         Rejected,
     }
 
@@ -83,12 +107,12 @@ public sealed class GroupService(GroupStore store)
         lock (_gate)
         {
             var group = store.Find(groupId);
-            if (group is null) return new IngestResult(0, paths.Count, 0);
+            if (group is null) return new IngestResult(0, paths.Count, 0, 0, 0);
 
             var dir = AppPaths.GroupDir(group.Id);
             Directory.CreateDirectory(dir);
 
-            int added = 0, skipped = 0, skippedGroups = 0;
+            int added = 0, skipped = 0, skippedGroups = 0, skippedTooLarge = 0, skippedFull = 0;
             foreach (var path in paths)
             {
                 switch (IngestOne(group, dir, path))
@@ -99,6 +123,14 @@ public sealed class GroupService(GroupStore store)
                     case IngestOutcome.RejectedAsGroup:
                         skipped++;
                         skippedGroups++;
+                        break;
+                    case IngestOutcome.RejectedTooLarge:
+                        skipped++;
+                        skippedTooLarge++;
+                        break;
+                    case IngestOutcome.RejectedGroupFull:
+                        skipped++;
+                        skippedFull++;
                         break;
                     default:
                         skipped++;
@@ -112,7 +144,7 @@ public sealed class GroupService(GroupStore store)
                 Changed?.Invoke();
             }
 
-            return new IngestResult(added, skipped, skippedGroups);
+            return new IngestResult(added, skipped, skippedGroups, skippedTooLarge, skippedFull);
         }
     }
 
@@ -124,6 +156,10 @@ public sealed class GroupService(GroupStore store)
             // navigator, and it is refused here rather than silently ignored so the caller can
             // explain why.
             if (store.FindByLinkPath(path) is not null) return IngestOutcome.RejectedAsGroup;
+
+            // Checked per item rather than up front, so a drop of ten onto a group holding six
+            // still takes the two that fit instead of refusing the whole batch.
+            if (group.Items.Count >= MaxItemsPerGroup) return IngestOutcome.RejectedGroupFull;
 
             var isFile = File.Exists(path);
             var isDir = Directory.Exists(path);
@@ -141,6 +177,21 @@ public sealed class GroupService(GroupStore store)
             // Nothing is stranded by this: every removal path restores to the desktop, and
             // startup sweeps any group folder the index has lost track of.
             var destination = UniquePath(Path.Combine(groupDir, Path.GetFileName(path)));
+
+            // Only a cross-volume move has to copy, and only a copy can take long enough to
+            // matter. Measuring is itself a directory walk, so it is skipped entirely when the
+            // move will be instant.
+            if (!IsSameVolume(path, destination))
+            {
+                var size = MeasureSize(path);
+                if (size > MaxCrossVolumeBytes)
+                {
+                    Log.Warn($"Refused '{path}': {size / 1024 / 1024} MB exceeds the " +
+                             $"{MaxCrossVolumeBytes / 1024 / 1024} MB cross-drive limit.");
+                    return IngestOutcome.RejectedTooLarge;
+                }
+            }
+
             MovePath(path, destination);
             ShellEnvironment.NotifyFileChanged(path, created: false);
 
@@ -449,6 +500,32 @@ public sealed class GroupService(GroupStore store)
         {
             CopyDirectory(source, destination);
             Directory.Delete(source, recursive: true);
+        }
+    }
+
+    /// <summary>True when both paths sit on the same volume, so a move needs no copying.</summary>
+    private static bool IsSameVolume(string a, string b) =>
+        string.Equals(Path.GetPathRoot(Path.GetFullPath(a)),
+                      Path.GetPathRoot(Path.GetFullPath(b)),
+                      StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Total bytes of a file, or of everything under a folder.</summary>
+    private static long MeasureSize(string path)
+    {
+        if (!Directory.Exists(path))
+            return new FileInfo(path).Length;
+
+        try
+        {
+            return new DirectoryInfo(path)
+                .EnumerateFiles("*", SearchOption.AllDirectories)
+                .Sum(f => f.Length);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Unreadable somewhere inside. Treat as oversized rather than starting a copy
+            // that will fail partway through.
+            return long.MaxValue;
         }
     }
 
