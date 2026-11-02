@@ -12,9 +12,29 @@ namespace Sirkyulo.App.Services;
 /// it came from, so removing an item, deleting a group and uninstalling can all put it back.
 /// A group folder the index has lost track of is swept back to the desktop on startup.
 /// </summary>
-public sealed class GroupService(GroupStore store)
+public sealed class GroupService
 {
     private readonly Lock _gate = new();
+    private readonly GroupStore store;
+    private readonly string _root;
+    private readonly string _desktop;
+    private readonly Action _removeStartup;
+    private readonly Action<string> _warn;
+    private string GroupsDir => Path.Combine(_root, "Groups");
+    private string GroupDir(Guid id) => Path.Combine(GroupsDir, id.ToString("N"));
+
+    public GroupService(GroupStore store)
+        : this(store, AppPaths.Root, ShellEnvironment.UserDesktop, StartupRegistration.Remove, Log.Warn) { }
+
+    internal GroupService(GroupStore store, string root, string desktop,
+        Action removeStartup, Action<string> warn)
+    {
+        this.store = store;
+        _root = root;
+        _desktop = desktop;
+        _removeStartup = removeStartup;
+        _warn = warn;
+    }
 
     public GroupStore Store => store;
 
@@ -32,8 +52,8 @@ public sealed class GroupService(GroupStore store)
         {
             var group = new Group { Id = Guid.NewGuid(), Name = SanitiseName(name) };
 
-            Directory.CreateDirectory(AppPaths.GroupDir(group.Id));
-            group.DesktopLinkPath = UniquePath(Path.Combine(ShellEnvironment.UserDesktop, group.Name + ".lnk"));
+            Directory.CreateDirectory(GroupDir(group.Id));
+            group.DesktopLinkPath = UniquePath(Path.Combine(_desktop, group.Name + ".lnk"));
 
             var exe = Environment.ProcessPath
                 ?? throw new InvalidOperationException("Cannot determine the running executable path.");
@@ -109,7 +129,7 @@ public sealed class GroupService(GroupStore store)
             var group = store.Find(groupId);
             if (group is null) return new IngestResult(0, paths.Count, 0, 0, 0);
 
-            var dir = AppPaths.GroupDir(group.Id);
+            var dir = GroupDir(group.Id);
             Directory.CreateDirectory(dir);
 
             int added = 0, skipped = 0, skippedGroups = 0, skippedTooLarge = 0, skippedFull = 0;
@@ -186,7 +206,7 @@ public sealed class GroupService(GroupStore store)
                 var size = MeasureSize(path);
                 if (size > MaxCrossVolumeBytes)
                 {
-                    Log.Warn($"Refused '{path}': {size / 1024 / 1024} MB exceeds the " +
+                    _warn($"Refused '{path}': {size / 1024 / 1024} MB exceeds the " +
                              $"{MaxCrossVolumeBytes / 1024 / 1024} MB cross-drive limit.");
                     return IngestOutcome.RejectedTooLarge;
                 }
@@ -207,7 +227,7 @@ public sealed class GroupService(GroupStore store)
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Log.Warn($"Could not ingest '{path}': {ex.Message}");
+            _warn($"Could not ingest '{path}': {ex.Message}");
             return IngestOutcome.Rejected;
         }
     }
@@ -223,7 +243,7 @@ public sealed class GroupService(GroupStore store)
             var item = group?.Items.FirstOrDefault(i => i.Id == itemId);
             if (group is null || item is null) return false;
 
-            RestoreItem(item);
+            if (RestoreItem(item) == RestoreOutcome.Failed) return false;
             group.Items.Remove(item);
             store.Save();
             Changed?.Invoke();
@@ -245,12 +265,22 @@ public sealed class GroupService(GroupStore store)
             var group = store.Find(groupId);
             if (group is null) return 0;
 
-            var restored = group.Items.Count(RestoreItem);
+            var restored = 0;
+            foreach (var item in group.Items.ToList())
+            {
+                var outcome = RestoreItem(item);
+                if (outcome == RestoreOutcome.Failed) continue;
+                if (outcome == RestoreOutcome.Restored) restored++;
+                group.Items.Remove(item);
+            }
 
-            if (removeDesktopLink) TryDelete(group.DesktopLinkPath);
-            TryDeleteDirectory(AppPaths.GroupDir(group.Id));
-
-            store.Remove(group.Id);
+            // A failed restore or an unindexed file must survive for a later recovery.
+            TryDeleteDirectory(GroupDir(group.Id));
+            if (group.Items.Count == 0 && !Directory.Exists(GroupDir(group.Id)))
+            {
+                if (removeDesktopLink) TryDelete(group.DesktopLinkPath);
+                store.Remove(group.Id);
+            }
             store.Save();
             Changed?.Invoke();
             return restored;
@@ -261,7 +291,9 @@ public sealed class GroupService(GroupStore store)
     /// Puts a single item back on the desktop. Moved shortcuts go home; items we merely linked
     /// to are left alone and their link is discarded, because the original never moved.
     /// </summary>
-    private bool RestoreItem(GroupItem item)
+    private enum RestoreOutcome { Restored, Discarded, Failed }
+
+    private RestoreOutcome RestoreItem(GroupItem item)
     {
         try
         {
@@ -269,30 +301,30 @@ public sealed class GroupService(GroupStore store)
             // the original never left the desktop, so only our link should go.
             if (!item.WasMoved)
             {
-                TryDelete(item.StoredPath);
-                return false;
+                File.Delete(item.StoredPath);
+                return RestoreOutcome.Discarded;
             }
 
-            if (!File.Exists(item.StoredPath) && !Directory.Exists(item.StoredPath)) return false;
+            if (!File.Exists(item.StoredPath) && !Directory.Exists(item.StoredPath)) return RestoreOutcome.Discarded;
 
             // Prefer the exact spot it came from; fall back to the desktop root if that
             // folder is gone, so a restore can never fail into nothing.
             var preferred = item.OriginalDesktopPath;
             var targetDir = preferred is not null ? Path.GetDirectoryName(preferred) : null;
             if (targetDir is null || !Directory.Exists(targetDir))
-                targetDir = ShellEnvironment.UserDesktop;
+                targetDir = _desktop;
 
             var fileName = preferred is not null ? Path.GetFileName(preferred) : Path.GetFileName(item.StoredPath);
             var destination = UniquePath(Path.Combine(targetDir, fileName));
 
             MovePath(item.StoredPath, destination);
             ShellEnvironment.NotifyFileChanged(destination, created: true);
-            return true;
+            return RestoreOutcome.Restored;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Log.Warn($"Could not restore '{item.StoredPath}': {ex.Message}");
-            return false;
+            _warn($"Could not restore '{item.StoredPath}': {ex.Message}");
+            return RestoreOutcome.Failed;
         }
     }
 
@@ -325,11 +357,18 @@ public sealed class GroupService(GroupStore store)
     {
         lock (_gate)
         {
+            var linksById = new Dictionary<Guid, string>();
+            foreach (var link in SafeListDesktopLinks())
+                if (TryReadGroupId(link, out var id)) linksById.TryAdd(id, link);
+
             foreach (var group in store.Groups)
             {
+                if (!File.Exists(group.DesktopLinkPath) && linksById.TryGetValue(group.Id, out var renamed))
+                    SyncRename(group.Id, renamed);
+
                 if (!File.Exists(group.DesktopLinkPath))
                 {
-                    Log.Warn($"Group '{group.Name}' lost its desktop icon; restoring {group.Items.Count} item(s).");
+                    _warn($"Group '{group.Name}' lost its desktop icon; restoring {group.Items.Count} item(s).");
                     DeleteGroup(group.Id, removeDesktopLink: false);
                     continue;
                 }
@@ -367,16 +406,20 @@ public sealed class GroupService(GroupStore store)
             var swept = RecoverOrphans();
             restored += swept.RestoredItems;
 
-            StartupRegistration.Remove();
+            // Recovery may have emptied a group that contained unindexed files.
+            foreach (var group in store.Groups.Where(g => g.Items.Count == 0))
+                DeleteGroup(group.Id, removeDesktopLink: true);
 
-            try
+            _removeStartup();
+
+            // Never recursively delete app data: failed restores still live here.
+            TryDeleteDirectory(GroupsDir);
+            if (store.Groups.Count == 0 && !Directory.Exists(GroupsDir))
             {
-                if (Directory.Exists(AppPaths.Root)) Directory.Delete(AppPaths.Root, recursive: true);
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                // The log lives in here and is still open, so a leftover file is expected and
-                // harmless — everything that mattered has already been returned to the desktop.
+                TryDelete(Path.Combine(_root, "groups.json"));
+                TryDelete(Path.Combine(_root, "groups.json.tmp"));
+                TryDeleteDirectory(Path.Combine(_root, "iconcache"));
+                TryDeleteDirectory(_root);
             }
 
             return restored;
@@ -401,34 +444,34 @@ public sealed class GroupService(GroupStore store)
     {
         lock (_gate)
         {
-            var known = store.Groups.Select(g => g.Id.ToString("N")).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var indexedPaths = store.Groups.SelectMany(g => g.Items)
+                .Select(i => Path.GetFullPath(i.StoredPath)).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var restored = 0;
 
-            if (Directory.Exists(AppPaths.GroupsDir))
+            if (Directory.Exists(GroupsDir))
             {
-                foreach (var dir in Directory.GetDirectories(AppPaths.GroupsDir))
+                foreach (var dir in Directory.GetDirectories(GroupsDir))
                 {
-                    if (known.Contains(Path.GetFileName(dir))) continue;
-
                     // Both files and subfolders: a group can now hold either, so sweeping only
                     // files would leave the user's folders buried in app data.
                     foreach (var entry in Directory.GetFileSystemEntries(dir))
                     {
+                        // Interrupted ingestion can leave unindexed entries in a known group.
+                        if (indexedPaths.Contains(Path.GetFullPath(entry))) continue;
                         try
                         {
                             var destination = UniquePath(
-                                Path.Combine(ShellEnvironment.UserDesktop, Path.GetFileName(entry)));
+                                Path.Combine(_desktop, Path.GetFileName(entry)));
                             MovePath(entry, destination);
                             ShellEnvironment.NotifyFileChanged(destination, created: true);
                             restored++;
                         }
                         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                         {
-                            Log.Warn($"Could not recover '{entry}': {ex.Message}");
+                            _warn($"Could not recover '{entry}': {ex.Message}");
                         }
                     }
 
-                    Log.Warn($"Recovered orphaned group folder '{Path.GetFileName(dir)}'.");
                     TryDeleteDirectory(dir);
                 }
             }
@@ -440,8 +483,9 @@ public sealed class GroupService(GroupStore store)
             {
                 if (!TryReadGroupId(link, out var id)) continue;
                 if (store.Find(id) is not null) continue;
+                if (Directory.Exists(GroupDir(id))) continue;
 
-                Log.Warn($"Removing dead group icon '{Path.GetFileNameWithoutExtension(link)}'.");
+                _warn($"Removing dead group icon '{Path.GetFileNameWithoutExtension(link)}'.");
                 TryDelete(link);
                 removed++;
             }
@@ -450,11 +494,11 @@ public sealed class GroupService(GroupStore store)
         }
     }
 
-    private static IEnumerable<string> SafeListDesktopLinks()
+    private IEnumerable<string> SafeListDesktopLinks()
     {
         try
         {
-            return Directory.GetFiles(ShellEnvironment.UserDesktop, "*.lnk");
+            return Directory.GetFiles(_desktop, "*.lnk");
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -496,7 +540,7 @@ public sealed class GroupService(GroupStore store)
         {
             Directory.Move(source, destination);
         }
-        catch (IOException)
+        catch (IOException) when (!IsSameVolume(source, destination))
         {
             CopyDirectory(source, destination);
             Directory.Delete(source, recursive: true);
@@ -570,7 +614,7 @@ public sealed class GroupService(GroupStore store)
         return cleaned.Length == 0 ? "New Group" : cleaned;
     }
 
-    private static void TryDelete(string path)
+    private void TryDelete(string path)
     {
         try
         {
@@ -580,19 +624,20 @@ public sealed class GroupService(GroupStore store)
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Log.Warn($"Could not delete '{path}': {ex.Message}");
+            _warn($"Could not delete '{path}': {ex.Message}");
         }
     }
 
-    private static void TryDeleteDirectory(string path)
+    private void TryDeleteDirectory(string path)
     {
         try
         {
-            if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
+            if (Directory.Exists(path) && !Directory.EnumerateFileSystemEntries(path).Any())
+                Directory.Delete(path, recursive: false);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Log.Warn($"Could not remove '{path}': {ex.Message}");
+            _warn($"Could not remove '{path}': {ex.Message}");
         }
     }
 }

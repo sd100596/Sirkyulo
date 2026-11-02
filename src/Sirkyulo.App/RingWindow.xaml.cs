@@ -236,7 +236,11 @@ public partial class RingWindow : Window
         var remove = new MenuItem { Header = "Remove from group" };
         remove.Click += (_, _) =>
         {
-            _service.RemoveItem(_group.Id, item.Id);
+            if (!_service.RemoveItem(_group.Id, item.Id))
+            {
+                ToastWindow.Show("Item could not be restored", "Your item is still in the group. Try again when its destination is available and the file is not in use.");
+                return;
+            }
             DismissImmediately();
         };
 
